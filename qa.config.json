@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "target": {
+    "path": "C:\\Users\\dopem\\Documents\\RCR\\software\\backend\\RideCityRentals-backend\\functions",
+    "name": "functions"
+  },
+  "ai": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-8",
+    "apiKeyEnv": "ANTHROPIC_API_KEY",
+    "effort": "high",
+    "maxOutputTokens": 8000
+  },
+  "run": {
+    "agents": [
+      "architecture-reviewer",
+      "backend-reviewer",
+      "security-auditor",
+      "test-generation"
+    ],
+    "failOn": "critical"
+  },
+  "tools": {
+    "packageManager": "npm",
+    "timeoutMs": 120000,
+    "allowTestExecution": false
+  },
+  "output": {
+    "dir": "./reports",
+    "formats": [
+      "markdown",
+      "json"
+    ]
+  }
+}
