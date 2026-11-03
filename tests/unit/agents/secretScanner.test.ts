@@ -48,3 +48,25 @@ describe("runSecretScan", () => {
     expect(findings).toHaveLength(0);
   });
 });
+
+describe("runSecretScan false positives", () => {
+  it("ignores a PEM header that only appears in a comment", async () => {
+    await fs.writeFile(path.join(tmpDir, "check.js"), '// v2 holds "-----BEGIN PRIVATE KEY-----" as its header\n/*\n * -----BEGIN PRIVATE KEY-----\n */\n');
+    expect(await runSecretScan(tmpDir, [])).toEqual([]);
+  });
+
+  it("still flags a PEM header in code, even after a comment that names it", async () => {
+    await fs.writeFile(path.join(tmpDir, "k.js"), '// -----BEGIN PRIVATE KEY-----\nconst k = "-----BEGIN PRIVATE KEY-----";\n');
+    const findings = await runSecretScan(tmpDir, []);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.severity).toBe("critical");
+    expect(findings[0]?.evidence[0]).toMatchObject({ excerpt: expect.stringContaining("k.js:2") });
+  });
+
+  it("downgrades a hardcoded jwt secret in a test file to low", async () => {
+    await fs.mkdir(path.join(tmpDir, "__tests__"));
+    await fs.writeFile(path.join(tmpDir, "__tests__", "auth.test.js"), 'jwt.sign(payload, "throwaway-secret");');
+    const findings = await runSecretScan(tmpDir, []);
+    expect(findings[0]?.severity).toBe("low");
+  });
+});

@@ -38,10 +38,18 @@ export class LeadAgentOrchestrator {
     // 2. Sequential agent execution in fixed canonical order — each agent sees prior findings.
     const findings: Finding[] = [];
     const agentResults: AgentResult[] = [];
-    const agents = resolveEnabledAgents(config.run.agents, this.agentRegistry);
+    const builtIn = resolveEnabledAgents(config.run.agents, this.agentRegistry);
+    const builtInNames = new Set<string>(this.agentRegistry.keys());
+    // Plugin agents run after the built-ins (so they see every built-in finding). A plugin agent
+    // may not reuse a built-in name: findings are matched across runs by agent name + id.
+    const pluginAgents = this.pluginManager.collectAgents().filter((agent) => {
+      if (!builtInNames.has(agent.name)) return true;
+      this.logger.warn(`Ignoring plugin agent "${agent.name}": the name belongs to a built-in agent`);
+      return false;
+    });
     const readFile = makeSandboxedReader(profile);
 
-    for (const agent of agents) {
+    for (const agent of [...builtIn, ...pluginAgents]) {
       this.logger.info(`Running agent: ${agent.name}...`);
       const ctx: AgentContext = {
         repoProfile: profile,
