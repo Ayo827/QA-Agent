@@ -1,25 +1,9 @@
 import { Command } from "commander";
-import path from "node:path";
-import { ConfigError, loadConfig } from "../../config/loader.js";
-import { AnthropicProvider } from "../../core/provider/anthropicProvider.js";
-import { scanRepo } from "../../core/discovery/repoScanner.js";
-import { createAgentRegistry } from "../../core/agents/registry.js";
-import { LeadAgentOrchestrator } from "../../core/orchestrator/leadAgent.js";
-import { shouldFailRun } from "../../core/orchestrator/runContext.js";
-import { ToolRunner } from "../../core/tool-runner/toolRunner.js";
-import { PluginManager } from "../../core/plugins/pluginManager.js";
-import { writeReport } from "../../core/reports/writer.js";
+import { hasRegression } from "../../core/compare/compare.js";
+import { shouldFailRun, type QARunResult } from "../../core/orchestrator/runContext.js";
 import { isVerified, SEVERITY_ORDER, type Finding, type Severity } from "../../core/evidence/types.js";
+import { executeRun, loadConfigFor, reportExpectedError, resolveReportFor } from "../shared.js";
 import { logger } from "../ui/logger.js";
-import type { Logger as AgentLogger } from "../../core/agents/types.js";
-
-function toAgentLogger(): AgentLogger {
-  return {
-    info: (m) => logger.dim(m),
-    warn: (m) => logger.warn(m),
-    error: (m) => logger.error(m),
-  };
-}
 
 export function registerRunCommand(program: Command): void {
   program
@@ -27,48 +11,39 @@ export function registerRunCommand(program: Command): void {
     .description("Run the full QA lifecycle against the configured (or given) target repo")
     .argument("[targetPath]", "Override target repo path for this run only")
     .option("--config <path>", "Path to qa.config.json")
+    .option("--baseline <ref>", 'Compare against an earlier report: "latest", a run directory, or a report.json')
+    .option("--fail-on-regression", "Exit non-zero if the run adds a medium+ finding or makes one worse (needs --baseline)", false)
     .action(async (targetPath: string | undefined, opts) => {
-      let config;
       try {
-        config = await loadConfig({ configPath: opts.config, targetPathOverride: targetPath });
+        const config = await loadConfigFor({ config: opts.config, targetPath });
+        // Resolve the baseline first: once this run writes its report, "latest" would mean itself.
+        const baselinePath = opts.baseline ? await resolveReportFor(config, opts.baseline) : undefined;
+        const { result, written } = await executeRun(config, { baselinePath });
+        finish(result, written.reportMdPath, Boolean(opts.failOnRegression));
       } catch (err) {
-        logger.error(err instanceof ConfigError ? [err.message, ...(err.details ?? [])].join("\n") : String(err));
-        process.exitCode = 1;
-        return;
-      }
-
-      let provider: AnthropicProvider;
-      try {
-        provider = AnthropicProvider.fromConfig(config);
-      } catch (err) {
-        logger.error(err instanceof Error ? err.message : String(err));
-        process.exitCode = 1;
-        return;
-      }
-
-      logger.heading(`Scanning ${config.target.path}...`);
-      const profile = await scanRepo(config.target.path);
-      logger.dim(`Detected: ${profile.language}, frameworks: ${profile.frameworks.join(", ") || "(none)"}, test framework: ${profile.testFramework}`);
-
-      const orchestrator = new LeadAgentOrchestrator(
-        createAgentRegistry(),
-        new ToolRunner(),
-        new PluginManager(),
-        toAgentLogger(),
-      );
-
-      logger.heading("Running QA pipeline...");
-      const result = await orchestrator.run(config, profile, provider);
-
-      logger.heading("Writing report...");
-      const written = await writeReport(result, path.resolve(process.cwd(), config.output.dir));
-
-      printSummary(result.findings, written.reportMdPath);
-
-      if (shouldFailRun(result)) {
-        process.exitCode = 1;
+        reportExpectedError(err);
       }
     });
+}
+
+/** Shared by `run` and `rerun`: print the summary and set the exit code. */
+export function finish(result: QARunResult, reportPath: string, failOnRegression: boolean): void {
+  printSummary(result.findings, reportPath);
+  if (result.comparison) {
+    const c = result.comparison;
+    logger.info(
+      `  Since baseline: ${c.resolved.length} resolved, ${c.introduced.length} new, ${c.changedSeverity.length} changed severity, ${c.persisting.length} unchanged`,
+    );
+  }
+  if (shouldFailRun(result)) process.exitCode = 1;
+  if (failOnRegression) {
+    if (!result.comparison) {
+      logger.warn("--fail-on-regression needs --baseline; no comparison was made.");
+    } else if (hasRegression(result.comparison)) {
+      logger.error("Regression against the baseline.");
+      process.exitCode = 1;
+    }
+  }
 }
 
 function printSummary(findings: Finding[], reportPath: string): void {

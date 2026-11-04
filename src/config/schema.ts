@@ -3,6 +3,10 @@ import { z } from "zod";
 export const AGENT_NAMES = [
   "architecture-reviewer",
   "backend-reviewer",
+  "api-contract-reviewer",
+  "data-layer-reviewer",
+  "dependency-auditor",
+  "performance-reviewer",
   "security-auditor",
   "test-generation",
 ] as const;
@@ -40,6 +44,11 @@ export const QAConfigSchema = z.object({
       allowTestExecution: z.boolean().default(false),
     })
     .default({}),
+  /**
+   * External plugins: module paths (relative to the config file's directory) or installed
+   * package names. Each must default-export (or export `plugin`) an object matching QAPlugin.
+   */
+  plugins: z.array(z.string().min(1)).default([]),
   output: z
     .object({
       dir: z.string().default("./reports"),
