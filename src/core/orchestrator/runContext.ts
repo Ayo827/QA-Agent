@@ -2,6 +2,7 @@ import type { QAConfig } from "../../config/schema.js";
 import type { RepoProfile } from "../discovery/repoScanner.js";
 import type { CommandResult } from "../tool-runner/types.js";
 import type { AgentResult } from "../agents/types.js";
+import type { RunComparison } from "../compare/compare.js";
 import { isVerified, SEVERITY_ORDER, type Finding, type Severity } from "../evidence/types.js";
 
 export interface QARunResult {
@@ -11,6 +12,8 @@ export interface QARunResult {
   findings: Finding[];
   generatedAt: string;
   config: QAConfig;
+  /** Present when the run was compared against an earlier report (qa run --baseline / qa rerun). */
+  comparison?: RunComparison;
 }
 
 /**

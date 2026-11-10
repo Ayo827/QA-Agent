@@ -115,7 +115,7 @@ export async function runSingleShotAgent(ctx: AgentContext, options: RunSingleSh
       messages: [{ role: "user", content: userPrompt }],
       maxTokens,
     });
-    const parsed = extractJson(response.text);
+    const parsed = normalizeAgentJson(extractJson(response.text));
     return AgentOutputSchema.parse(parsed);
   };
 
@@ -146,6 +146,53 @@ export async function runSingleShotAgent(ctx: AgentContext, options: RunSingleSh
       summary: `Agent failed: ${describeError(err)}`,
     };
   }
+}
+
+/**
+ * Repairs the small, common slips models make in evidence entries before schema validation, so a
+ * whole review is not thrown away (and re-paid for) over them: a lineRange written as "10-20", or
+ * an ai_inference entry that carries its reasoning in `excerpt` instead of `rationale`.
+ * Anything it cannot repair is left for the schema to reject.
+ */
+export function normalizeAgentJson(raw: unknown): unknown {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const findings = (raw as { findings?: unknown }).findings;
+  if (!Array.isArray(findings)) return raw;
+  for (const finding of findings) {
+    const evidence = (finding as { evidence?: unknown } | null)?.evidence;
+    if (!Array.isArray(evidence)) continue;
+    for (const entry of evidence) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const e = entry as Record<string, unknown>;
+      if (e.type === "static_analysis" && "lineRange" in e) {
+        const range = normalizeLineRange(e.lineRange);
+        if (range) e.lineRange = range;
+        else delete e.lineRange;
+      }
+      if (e.type === "ai_inference") {
+        if (typeof e.rationale !== "string") {
+          e.rationale = typeof e.excerpt === "string" ? e.excerpt : "(no rationale given)";
+        }
+        if (e.confidence !== "low" && e.confidence !== "medium" && e.confidence !== "high") e.confidence = "low";
+      }
+    }
+  }
+  return raw;
+}
+
+function normalizeLineRange(value: unknown): [number, number] | undefined {
+  if (Array.isArray(value)) {
+    const nums = value.map(Number).filter(Number.isFinite);
+    if (nums.length === 1) return [nums[0] as number, nums[0] as number];
+    if (nums.length === 2) return [nums[0] as number, nums[1] as number];
+    return undefined;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return [value, value];
+  if (typeof value === "string") {
+    const m = /^\D*(\d+)\s*(?:[-–:,]|to)?\s*(\d+)?\D*$/.exec(value.trim());
+    if (m?.[1]) return [Number(m[1]), Number(m[2] ?? m[1])];
+  }
+  return undefined;
 }
 
 export function extractJson(text: string): unknown {

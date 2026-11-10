@@ -3,6 +3,7 @@ import {
   BASE_HOUSE_PROMPT,
   describeError,
   extractJson,
+  normalizeAgentJson,
   formatFileExcerpts,
   readFiles,
   summarizeRepoProfile,
@@ -79,9 +80,10 @@ Produce your findings and proposedFiles now, following the required JSON output 
       const response = await ctx.provider.complete({
         system,
         messages: [{ role: "user", content: prompt }],
-        maxTokens: ctx.config.ai.maxOutputTokens,
+        // Whole test files come back inside the JSON, so this agent needs more room than a review.
+        maxTokens: Math.max(ctx.config.ai.maxOutputTokens, 16_000),
       });
-      return TestGenOutputSchema.parse(extractJson(response.text));
+      return TestGenOutputSchema.parse(normalizeAgentJson(extractJson(response.text)));
     };
 
     try {

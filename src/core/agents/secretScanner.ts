@@ -29,6 +29,21 @@ const PATTERN_RULES: PatternRule[] = [
 
 const SCAN_EXTENSIONS = new Set([".js", ".ts", ".mjs", ".cjs", ".json", ".env", ".yml", ".yaml"]);
 
+const COMMENT_LINE = /^\s*(\/\/|\/\*|\*|#)/;
+
+/** First match that is not on a comment line (a comment that names a PEM header is not a key). */
+function firstCodeMatch(content: string, regex: RegExp): RegExpExecArray | undefined {
+  const global = new RegExp(regex.source, regex.flags.includes("g") ? regex.flags : regex.flags + "g");
+  let match: RegExpExecArray | null;
+  while ((match = global.exec(content)) !== null) {
+    const lineStart = content.lastIndexOf("\n", match.index) + 1;
+    const lineEnd = content.indexOf("\n", match.index);
+    const line = content.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+    if (!COMMENT_LINE.test(line)) return match;
+  }
+  return undefined;
+}
+
 /**
  * Deterministic, non-LLM regex scan for hardcoded secrets across source files (excludes
  * node_modules and anything already flagged as a likely secret FILE by discovery, since those
@@ -56,14 +71,17 @@ export async function runSecretScan(rootPath: string, excludeRelativePaths: stri
       continue;
     }
 
+    const isTestFile = /(^|[\\/])(__tests__|tests?|fixtures?)[\\/]|\.(test|spec)\.[jt]s$/.test(relativePath);
     for (const rule of PATTERN_RULES) {
-      const match = rule.regex.exec(content);
+      const match = firstCodeMatch(content, rule.regex);
       if (!match) continue;
       const lineNumber = content.slice(0, match.index).split("\n").length;
+      // Test fixtures routinely sign tokens with throwaway literals: keep them visible, not alarming.
+      const severity: Finding["severity"] = isTestFile ? "low" : rule.severity;
       findings.push({
         id: `secret-scan-${rule.id}-${relativePath.replace(/[\\/]/g, "-")}`,
         agent: "security-auditor",
-        severity: rule.severity,
+        severity,
         title: `Possible secret: ${rule.description}`,
         description: `A pattern matching "${rule.description}" was found in ${relativePath}.`,
         evidence: [

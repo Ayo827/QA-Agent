@@ -15,6 +15,10 @@
     "agents": [
       "architecture-reviewer",
       "backend-reviewer",
+      "api-contract-reviewer",
+      "data-layer-reviewer",
+      "dependency-auditor",
+      "performance-reviewer",
       "security-auditor",
       "test-generation"
     ],
